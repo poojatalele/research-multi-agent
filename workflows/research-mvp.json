@@ -1,0 +1,270 @@
+{
+  "name": "Multi-Agent Research Assistant (MVP)",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Multi-Agent Research Assistant",
+        "formDescription": "Enter a topic. Agents will search arXiv + Semantic Scholar + OpenAlex, summarize the top papers, compare them, and propose a hypothesis with an experiment plan.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Research topic",
+              "placeholder": "e.g. multi-agent systems for smart agriculture",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Max papers",
+              "fieldType": "number",
+              "placeholder": "10",
+              "requiredField": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "form-trigger",
+      "name": "Research Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.1,
+      "position": [-1000, 0],
+      "webhookId": "research-topic-form"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Agent 1 — Literature Search\n// Fetches arXiv + Semantic Scholar + OpenAlex in parallel, normalizes, dedupes, scores, returns top-N.\n\nconst input = $input.first().json;\nconst topic = input['Research topic'] || input.topic || '';\nconst maxPapers = parseInt(input['Max papers'] || input.max_papers || 10, 10);\n\nif (!topic || !topic.trim()) {\n  throw new Error('Research topic is required.');\n}\n\nconst q = encodeURIComponent(topic);\nconst currentYear = new Date().getFullYear();\n\nconst s2Key = (typeof process !== 'undefined' && process.env.S2_API_KEY) || '';\nconst oaMailto = (typeof process !== 'undefined' && process.env.OPENALEX_MAILTO) || '';\n\n// ---- arXiv ----\nconst arxivP = this.helpers.httpRequest({\n  method: 'GET',\n  url: 'http://export.arxiv.org/api/query?search_query=all:' + q + '&start=0&max_results=30&sortBy=relevance&sortOrder=descending',\n  json: false,\n  returnFullResponse: false,\n}).then(function (xml) {\n  const entries = String(xml).split('<entry>').slice(1);\n  return entries.map(function (e) {\n    const get = function (tag) {\n      const m = e.match(new RegExp('<' + tag + '[^>]*>([\\\\s\\\\S]*?)</' + tag + '>'));\n      return m ? m[1].trim() : '';\n    };\n    const title = get('title').replace(/\\s+/g, ' ');\n    const summary = get('summary').replace(/\\s+/g, ' ');\n    const published = get('published');\n    const id = get('id');\n    const authorBlocks = e.match(/<author>[\\s\\S]*?<\\/author>/g) || [];\n    const authors = authorBlocks.map(function (a) {\n      const m = a.match(/<name>([^<]+)<\\/name>/);\n      return m ? m[1] : '';\n    }).filter(Boolean);\n    return {\n      title: title,\n      abstract: summary,\n      authors: authors,\n      year: published ? parseInt(published.slice(0, 4), 10) : null,\n      citations: null,\n      url: id,\n      source: 'arXiv',\n      doi: null,\n    };\n  });\n}).catch(function (e) { console.log('arXiv error:', e.message); return []; });\n\n// ---- Semantic Scholar ----\nconst s2Headers = {};\nif (s2Key) s2Headers['x-api-key'] = s2Key;\nconst s2P = this.helpers.httpRequest({\n  method: 'GET',\n  url: 'https://api.semanticscholar.org/graph/v1/paper/search?query=' + q + '&limit=30&fields=title,abstract,authors,year,citationCount,externalIds,url',\n  headers: s2Headers,\n  json: true,\n}).then(function (r) {\n  return (r.data || []).map(function (p) {\n    return {\n      title: p.title || '',\n      abstract: p.abstract || '',\n      authors: (p.authors || []).map(function (a) { return a.name; }),\n      year: p.year,\n      citations: p.citationCount,\n      url: p.url,\n      source: 'Semantic Scholar',\n      doi: (p.externalIds && p.externalIds.DOI) || null,\n    };\n  });\n}).catch(function (e) { console.log('S2 error:', e.message); return []; });\n\n// ---- OpenAlex ----\nlet oaUrl = 'https://api.openalex.org/works?search=' + q + '&per_page=30&sort=relevance_score:desc';\nif (oaMailto) oaUrl += '&mailto=' + encodeURIComponent(oaMailto);\nconst oaP = this.helpers.httpRequest({\n  method: 'GET',\n  url: oaUrl,\n  json: true,\n}).then(function (r) {\n  return (r.results || []).map(function (p) {\n    let abstract = '';\n    if (p.abstract_inverted_index) {\n      const positions = [];\n      for (const word of Object.keys(p.abstract_inverted_index)) {\n        for (const i of p.abstract_inverted_index[word]) positions.push([i, word]);\n      }\n      positions.sort(function (a, b) { return a[0] - b[0]; });\n      abstract = positions.map(function (pair) { return pair[1]; }).join(' ');\n    }\n    return {\n      title: p.title || p.display_name || '',\n      abstract: abstract,\n      authors: (p.authorships || []).map(function (a) { return a.author && a.author.display_name; }).filter(Boolean),\n      year: p.publication_year,\n      citations: p.cited_by_count,\n      url: p.id,\n      source: 'OpenAlex',\n      doi: p.doi,\n    };\n  });\n}).catch(function (e) { console.log('OpenAlex error:', e.message); return []; });\n\nconst results = await Promise.all([arxivP, s2P, oaP]);\nconst all = results[0].concat(results[1]).concat(results[2]);\n\n// ---- Dedupe ----\nconst seen = new Map();\nfor (const p of all) {\n  const keySrc = (p.doi || p.title || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 80);\n  if (!keySrc) continue;\n  if (!seen.has(keySrc)) {\n    seen.set(keySrc, p);\n  } else {\n    const existing = seen.get(keySrc);\n    if (!existing.citations && p.citations) existing.citations = p.citations;\n    if (!existing.abstract && p.abstract) existing.abstract = p.abstract;\n    if (!existing.doi && p.doi) existing.doi = p.doi;\n    if (existing.source.indexOf(p.source) === -1) existing.source = existing.source + ', ' + p.source;\n  }\n}\nconst merged = Array.from(seen.values()).filter(function (p) { return p.title; });\n\n// ---- Score & rank ----\nconst terms = topic.toLowerCase().split(/\\s+/).filter(function (t) { return t.length > 2; });\nconst maxCit = Math.max.apply(null, [1].concat(merged.map(function (p) { return p.citations || 0; })));\nfor (const p of merged) {\n  const recency = p.year ? Math.max(0, 1 - (currentYear - p.year) / 10) : 0.3;\n  const cit = Math.log(1 + (p.citations || 0)) / Math.log(1 + maxCit);\n  const text = ((p.title || '') + ' ' + (p.abstract || '')).toLowerCase();\n  const rel = terms.length ? (terms.filter(function (t) { return text.indexOf(t) !== -1; }).length / terms.length) : 0.5;\n  p._score = 0.4 * cit + 0.3 * recency + 0.3 * rel;\n}\nmerged.sort(function (a, b) { return b._score - a._score; });\n\nconst top = merged.slice(0, maxPapers);\nreturn top.map(function (p) { return { json: Object.assign({}, p, { topic: topic }) }; });\n"
+      },
+      "id": "search-agent",
+      "name": "1. Literature Search Agent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-780, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Build the Gemini request body for Agent 2 (per-paper summarizer).\nconst text = [\n  'You are the Paper Summarization Agent in a research team.',\n  '',\n  'Read the paper metadata below and produce a structured summary. Be terse and factual — if a field is not derivable from the abstract, write \"N/A\" rather than guessing.',\n  '',\n  'Title: ' + ($json.title || ''),\n  'Authors: ' + (($json.authors || []).join(', ')),\n  'Year: ' + ($json.year || ''),\n  'Source: ' + ($json.source || ''),\n  'URL: ' + ($json.url || ''),\n  '',\n  'Abstract:',\n  $json.abstract || '(no abstract available)',\n  '',\n  'Return JSON with exactly these fields:',\n  '{',\n  '  \"problem\": \"what problem the paper addresses (1-2 sentences)\",',\n  '  \"method\": \"the methodology or approach (1-2 sentences)\",',\n  '  \"dataset\": \"dataset(s) used, or N/A\",',\n  '  \"architecture\": \"model/system architecture, or N/A\",',\n  '  \"results\": \"key results, including numbers when stated\",',\n  '  \"limitations\": \"stated or apparent limitations\",',\n  '  \"novelty\": \"what is novel about this work vs prior art\"',\n  '}',\n  '',\n  'Output ONLY valid JSON, no markdown fences.',\n].join('\\n');\n\nreturn {\n  json: Object.assign({}, $json, {\n    geminiBody: {\n      contents: [{ parts: [{ text: text }] }],\n      generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },\n    },\n  }),\n};\n"
+      },
+      "id": "build-summarize",
+      "name": "Build Summarize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-560, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-goog-api-key", "value": "={{ $env.GEMINI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.geminiBody) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "summarize-http",
+      "name": "2. Paper Summarization Agent (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-340, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse Gemini's JSON response and attach the originating paper's metadata.\nconst raw = ($json.candidates && $json.candidates[0] && $json.candidates[0].content && $json.candidates[0].content.parts && $json.candidates[0].content.parts[0] && $json.candidates[0].content.parts[0].text) || '{}';\nconst cleaned = raw.replace(/^```json\\s*/i, '').replace(/```\\s*$/i, '').trim();\nlet summary;\ntry {\n  summary = JSON.parse(cleaned);\n} catch (e) {\n  summary = { error: 'parse failed', raw: cleaned };\n}\n\n// Reach back to the originating paper via paired-item lineage.\nconst paper = $('1. Literature Search Agent').item.json;\n\nreturn {\n  json: Object.assign({}, summary, {\n    _meta: {\n      title: paper.title,\n      authors: paper.authors,\n      year: paper.year,\n      citations: paper.citations,\n      url: paper.url,\n      source: paper.source,\n      doi: paper.doi,\n    },\n  }),\n};\n"
+      },
+      "id": "parse-summary",
+      "name": "Parse Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-120, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Collapse N per-paper summaries into a single item carrying the whole array.\nconst items = $input.all();\nconst summaries = items.map(function (i) { return i.json; });\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || '';\nreturn [{ json: { topic: topic, summaries: summaries, paper_count: summaries.length } }];\n"
+      },
+      "id": "aggregate",
+      "name": "Aggregate Summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build the Gemini request body for Agent 4 (comparator).\nconst topic = $json.topic;\nconst summaries = $json.summaries;\n\nconst text = [\n  'You are the Comparison Agent in a research team. Given structured summaries of N papers on a single topic, produce a comparison that helps a researcher quickly see how the papers relate.',\n  '',\n  'Topic: ' + topic,\n  '',\n  'Summaries (JSON array):',\n  JSON.stringify(summaries, null, 2),\n  '',\n  'Return JSON with exactly these fields:',\n  '{',\n  '  \"table_markdown\": \"a GitHub-flavored markdown table with columns: | Paper | Method | Dataset | Strength | Weakness | Novelty |. Use short paper labels (first author + year). One row per paper, max ~12 words per cell.\",',\n  '  \"clusters\": [ { \"name\": \"cluster label\", \"papers\": [\"label\", \"label\"], \"common_thread\": \"1 sentence\" } ],',\n  '  \"observations\": \"3-5 short paragraphs of cross-paper observations: trends, disagreements, evolution over time, dominant datasets, methodological tradeoffs.\"',\n  '}',\n  '',\n  'Output ONLY valid JSON, no markdown fences.',\n].join('\\n');\n\nreturn [{\n  json: {\n    topic: topic,\n    summaries: summaries,\n    geminiBody: {\n      contents: [{ parts: [{ text: text }] }],\n      generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },\n    },\n  },\n}];\n"
+      },
+      "id": "build-compare",
+      "name": "Build Compare Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [320, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-goog-api-key", "value": "={{ $env.GEMINI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.geminiBody) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "compare-http",
+      "name": "4. Comparison Agent (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [540, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const raw = ($json.candidates && $json.candidates[0] && $json.candidates[0].content && $json.candidates[0].content.parts && $json.candidates[0].content.parts[0] && $json.candidates[0].content.parts[0].text) || '{}';\nconst cleaned = raw.replace(/^```json\\s*/i, '').replace(/```\\s*$/i, '').trim();\nlet comparison;\ntry {\n  comparison = JSON.parse(cleaned);\n} catch (e) {\n  comparison = { error: 'parse failed', raw: cleaned };\n}\nreturn [{ json: comparison }];\n"
+      },
+      "id": "parse-compare",
+      "name": "Parse Comparison",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [760, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build the Gemini request body for Agent 5 (hypothesizer + experiment planner).\nconst agg = $('Aggregate Summaries').first().json;\nconst comparison = $json;\n\nconst text = [\n  'You are the Hypothesis Generation Agent in a research team. Based on the literature analysis below, identify research gaps and propose a novel, testable hypothesis with an experiment plan.',\n  '',\n  'Topic: ' + agg.topic,\n  '',\n  'Paper summaries:',\n  JSON.stringify(agg.summaries),\n  '',\n  'Cross-paper comparison:',\n  JSON.stringify(comparison),\n  '',\n  'Ground rules:',\n  '- A gap must point to something the surveyed papers do NOT do. Be specific about what is missing.',\n  '- The hypothesis must be falsifiable.',\n  '- The experiment plan must be runnable by a single team within ~3 months.',\n  '',\n  'Return JSON with exactly these fields:',\n  '{',\n  '  \"research_gaps\": [\"3-5 specific gaps, phrased as: No surveyed work does X, even though Y suggests it would matter.\"],',\n  '  \"hypothesis\": { \"statement\": \"one-sentence falsifiable claim\", \"rationale\": \"2-3 sentences linking to specific gaps and cited papers\" },',\n  '  \"experiment_plan\": {',\n  '    \"objective\": \"what success looks like\",',\n  '    \"dataset_or_simulation\": \"concrete named data source or simulator\",',\n  '    \"baselines\": [\"3-5 specific baselines\"],',\n  '    \"metrics\": [\"specific metrics with units\"],',\n  '    \"implementation_steps\": [\"ordered concrete steps\"]',\n  '  },',\n  '  \"risks\": [\"3-5 concrete things that could fail or invalidate the experiment\"]',\n  '}',\n  '',\n  'Output ONLY valid JSON, no markdown fences.',\n].join('\\n');\n\nreturn [{\n  json: {\n    geminiBody: {\n      contents: [{ parts: [{ text: text }] }],\n      generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },\n    },\n  },\n}];\n"
+      },
+      "id": "build-hypothesis",
+      "name": "Build Hypothesis Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-goog-api-key", "value": "={{ $env.GEMINI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.geminiBody) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "hypothesize-http",
+      "name": "5. Hypothesis Generation Agent (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const raw = ($json.candidates && $json.candidates[0] && $json.candidates[0].content && $json.candidates[0].content.parts && $json.candidates[0].content.parts[0] && $json.candidates[0].content.parts[0].text) || '{}';\nconst cleaned = raw.replace(/^```json\\s*/i, '').replace(/```\\s*$/i, '').trim();\nlet hyp;\ntry {\n  hyp = JSON.parse(cleaned);\n} catch (e) {\n  hyp = { error: 'parse failed', raw: cleaned };\n}\nreturn [{ json: hyp }];\n"
+      },
+      "id": "parse-hypothesis",
+      "name": "Parse Hypothesis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build Report — assemble the final markdown and emit as binary for the file-writer.\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || 'Unknown topic';\n\nconst agg = $('Aggregate Summaries').first().json;\nconst summaries = agg.summaries || [];\n\nconst comparison = $('Parse Comparison').first().json || {};\nconst hyp = $json || {};\n\nconst date = new Date().toISOString().slice(0, 10);\n\nfunction esc(s) { return (s == null ? '' : String(s)); }\nfunction authorLine(meta) {\n  const a = (meta && meta.authors) || [];\n  if (a.length === 0) return 'Unknown authors';\n  if (a.length <= 4) return a.join(', ');\n  return a.slice(0, 4).join(', ') + ' et al.';\n}\n\nlet md = '';\nmd += '# Research Report: ' + topic + '\\n\\n';\nmd += '_Generated ' + date + ' by the Multi-Agent Research Assistant._\\n\\n';\nmd += '---\\n\\n';\n\nmd += '## 1. Literature Summary\\n\\n';\nmd += 'Reviewed **' + summaries.length + '** papers across arXiv, Semantic Scholar, and OpenAlex.\\n\\n';\nfor (const s of summaries) {\n  const meta = s._meta || {};\n  md += '### ' + esc(meta.title || s.title || 'Untitled') + '\\n';\n  md += '*' + authorLine(meta) + ' (' + esc(meta.year || 'n.d.') + ')';\n  if (meta.citations != null) md += ' · ' + meta.citations + ' citations';\n  md += ' · ' + esc(meta.source || '');\n  if (meta.url) md += ' · [link](' + meta.url + ')';\n  md += '*\\n\\n';\n  md += '- **Problem:** ' + esc(s.problem) + '\\n';\n  md += '- **Method:** ' + esc(s.method) + '\\n';\n  md += '- **Dataset:** ' + esc(s.dataset) + '\\n';\n  md += '- **Architecture:** ' + esc(s.architecture) + '\\n';\n  md += '- **Results:** ' + esc(s.results) + '\\n';\n  md += '- **Limitations:** ' + esc(s.limitations) + '\\n';\n  md += '- **Novelty:** ' + esc(s.novelty) + '\\n\\n';\n}\n\nmd += '## 2. Comparison\\n\\n';\nmd += (comparison.table_markdown || '_No comparison table generated._') + '\\n\\n';\n\nif (comparison.clusters && comparison.clusters.length) {\n  md += '### Clusters\\n\\n';\n  for (const c of comparison.clusters) {\n    md += '- **' + esc(c.name) + '** — ' + esc(c.common_thread || '') + '\\n';\n    md += '  - Papers: ' + (c.papers || []).join(', ') + '\\n';\n  }\n  md += '\\n';\n}\n\nif (comparison.observations) {\n  md += '### Cross-paper Observations\\n\\n' + comparison.observations + '\\n\\n';\n}\n\nmd += '## 3. Research Gaps\\n\\n';\nfor (const g of (hyp.research_gaps || [])) md += '- ' + esc(g) + '\\n';\nif (!(hyp.research_gaps && hyp.research_gaps.length)) md += '_(none identified)_\\n';\nmd += '\\n';\n\nmd += '## 4. Proposed Hypothesis\\n\\n';\nif (hyp.hypothesis) {\n  md += '> **' + esc(hyp.hypothesis.statement) + '**\\n\\n';\n  md += esc(hyp.hypothesis.rationale) + '\\n\\n';\n}\n\nmd += '## 5. Experiment Plan\\n\\n';\nconst ep = hyp.experiment_plan || {};\nmd += '**Objective:** ' + esc(ep.objective) + '\\n\\n';\nmd += '**Dataset / simulation:** ' + esc(ep.dataset_or_simulation) + '\\n\\n';\nif ((ep.baselines || []).length) {\n  md += '**Baselines:**\\n';\n  for (const b of ep.baselines) md += '- ' + esc(b) + '\\n';\n  md += '\\n';\n}\nif ((ep.metrics || []).length) {\n  md += '**Metrics:**\\n';\n  for (const m of ep.metrics) md += '- ' + esc(m) + '\\n';\n  md += '\\n';\n}\nif ((ep.implementation_steps || []).length) {\n  md += '**Implementation steps:**\\n';\n  ep.implementation_steps.forEach(function (step, i) { md += (i + 1) + '. ' + esc(step) + '\\n'; });\n  md += '\\n';\n}\n\nmd += '## 6. Risks & Caveats\\n\\n';\nfor (const r of (hyp.risks || [])) md += '- ' + esc(r) + '\\n';\nif (!(hyp.risks && hyp.risks.length)) md += '_(none identified)_\\n';\nmd += '\\n---\\n\\n_End of report._\\n';\n\nconst safeSlug = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);\nconst filename = 'report-' + date + '-' + safeSlug + '.md';\n\nconst binary = await this.helpers.prepareBinaryData(Buffer.from(md, 'utf-8'), filename, 'text/markdown');\n\nreturn [{\n  json: { topic: topic, filename: filename, paper_count: summaries.length },\n  binary: { data: binary },\n}];\n"
+      },
+      "id": "build-report",
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 0]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $env.REPORTS_DIR }}/{{ $json.filename }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "write-report",
+      "name": "Write Report",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1860, 0]
+    }
+  ],
+  "connections": {
+    "Research Form": {
+      "main": [[{ "node": "1. Literature Search Agent", "type": "main", "index": 0 }]]
+    },
+    "1. Literature Search Agent": {
+      "main": [[{ "node": "Build Summarize Request", "type": "main", "index": 0 }]]
+    },
+    "Build Summarize Request": {
+      "main": [[{ "node": "2. Paper Summarization Agent (Gemini)", "type": "main", "index": 0 }]]
+    },
+    "2. Paper Summarization Agent (Gemini)": {
+      "main": [[{ "node": "Parse Summary", "type": "main", "index": 0 }]]
+    },
+    "Parse Summary": {
+      "main": [[{ "node": "Aggregate Summaries", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Summaries": {
+      "main": [[{ "node": "Build Compare Request", "type": "main", "index": 0 }]]
+    },
+    "Build Compare Request": {
+      "main": [[{ "node": "4. Comparison Agent (Gemini)", "type": "main", "index": 0 }]]
+    },
+    "4. Comparison Agent (Gemini)": {
+      "main": [[{ "node": "Parse Comparison", "type": "main", "index": 0 }]]
+    },
+    "Parse Comparison": {
+      "main": [[{ "node": "Build Hypothesis Request", "type": "main", "index": 0 }]]
+    },
+    "Build Hypothesis Request": {
+      "main": [[{ "node": "5. Hypothesis Generation Agent (Gemini)", "type": "main", "index": 0 }]]
+    },
+    "5. Hypothesis Generation Agent (Gemini)": {
+      "main": [[{ "node": "Parse Hypothesis", "type": "main", "index": 0 }]]
+    },
+    "Parse Hypothesis": {
+      "main": [[{ "node": "Build Report", "type": "main", "index": 0 }]]
+    },
+    "Build Report": {
+      "main": [[{ "node": "Write Report", "type": "main", "index": 0 }]]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

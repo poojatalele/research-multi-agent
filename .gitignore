@@ -1,0 +1,6 @@
+.env
+.n8n/
+node_modules/
+reports/*.md
+!reports/.gitkeep
+.DS_Store
