@@ -16,17 +16,42 @@ A small team of cooperating agents that, given a research topic, search the lite
 
 See [`docs/architecture.md`](docs/architecture.md) for the data flow.
 
+## Chosen MVP
+
+Use the n8n Agent + tool workflow as the main MVP. It is easier to explain and demonstrate because the canvas reads like a research team:
+
+`Research Form -> Literature Agent -> Summarization Agent -> Comparator Agent -> Hypothesis Agent -> Build Report -> Write Report`
+
+Keep [`workflows/research-mvp.json`](workflows/research-mvp.json) as the older deterministic REST reference. It is useful for debugging Gemini request shapes, but the agent workflow should not be mixed with the REST workflow nodes. See [`docs/agent-workflow.md`](docs/agent-workflow.md) for the clean agent version.
+
 ## Prerequisites
 
-- Node.js (already on this machine — v22)
+- Node.js, if running with `./start-n8n.sh`
+- Docker Desktop, if running with Docker
 - A Gemini API key — get one free at https://aistudio.google.com/apikey
-
-That's it. No Docker required.
 
 ## Setup
 
+### Option A: Docker
+
+This is the setup currently used on this machine:
+
 ```bash
-cd /Users/apple/Documents/research-agents
+cd /Users/syedanoorain/Downloads/research-multi-agent
+docker run -d --name n8n -p 5678:5678 --env-file .env \
+  -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
+  -e N8N_RUNNERS_ENABLED=true \
+  -e N8N_SECURE_COOKIE=false \
+  -v n8n_data:/home/node/.n8n \
+  docker.n8n.io/n8nio/n8n
+```
+
+Open `http://localhost:5678`.
+
+### Option B: Local n8n
+
+```bash
+cd /Users/syedanoorain/Downloads/research-multi-agent
 cp .env.example .env
 # Open .env and paste your GEMINI_API_KEY
 ./start-n8n.sh
@@ -36,15 +61,16 @@ First launch downloads n8n (~300MB) and may take a minute. When you see "Editor 
 
 n8n will ask you to create a local account on first run (email + password — stays on your machine).
 
-## Import the workflow
+## Build the workflow
 
 In the n8n UI:
 
-1. Top right → **Create Workflow** → **⋯ menu** → **Import from file**
-2. Pick [`workflows/research-mvp.json`](workflows/research-mvp.json)
-3. Click **Save** (top right)
+1. Create a new workflow.
+2. Build the agent-native canvas described in [`docs/agent-workflow.md`](docs/agent-workflow.md).
+3. Keep [`workflows/research-mvp.json`](workflows/research-mvp.json) open as a reference for report formatting and field names.
+4. Click **Save** (top right).
 
-You should see 14 nodes in a horizontal chain starting at "Research Form".
+The final canvas should read as one clean chain: form, literature search agent, paper normalization, summarization agent, aggregation, comparator agent, hypothesis agent, report builder, file writer.
 
 ## Run it
 
@@ -57,7 +83,14 @@ You can also click any node in the n8n editor while it's running to inspect what
 
 ## Editing the prompts
 
-Three Gemini agents have their prompts inside `Build * Request` Code nodes:
+For the agent workflow, prompts live directly inside the n8n Agent nodes:
+
+- **Literature Agent** uses tool calls to search sources and returns a strict JSON paper list.
+- **Summarization Agent** receives papers and returns one structured summary per paper.
+- **Comparator Agent** receives all summaries and returns a comparison table plus clusters.
+- **Hypothesis Agent** receives summaries plus comparison output and returns gaps, hypothesis, experiment plan, and risks.
+
+The older REST workflow keeps prompts inside `Build * Request` Code nodes:
 
 - **Agent 2** prompt — in node *Build Summarize Request*
 - **Agent 4** prompt — in node *Build Compare Request*
@@ -67,7 +100,7 @@ Source-of-truth copies live in [`prompts/`](prompts/) so you can iterate on them
 
 ## Tuning the search
 
-The search agent's score weights, recency window, and per-source result count are all at the top of the **1. Literature Search Agent** Code node. See [`prompts/01-search.md`](prompts/01-search.md) for what each knob does.
+For the agent workflow, tune search inside the **Literature Agent** prompt and its connected search tool nodes. Start with arXiv only, `Max papers = 3`, then add Semantic Scholar/OpenAlex once the end-to-end report works. See [`prompts/01-search.md`](prompts/01-search.md) for the older deterministic search logic and useful ranking ideas.
 
 ## Cost note
 

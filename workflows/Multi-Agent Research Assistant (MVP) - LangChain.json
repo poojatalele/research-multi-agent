@@ -1,0 +1,537 @@
+{
+  "name": "Multi-Agent Research Assistant (MVP) - LangChain",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "956461cf-7746-40d3-af48-6df529dd83f0",
+        "formTitle": "Multi-Agent Research Assistant",
+        "formDescription": "Enter a topic. Agents will search academic sources, summarize the top papers, compare them, and propose a hypothesis with an experiment plan.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Research topic",
+              "placeholder": "e.g. multi-agent systems for smart agriculture",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Max papers",
+              "fieldType": "number",
+              "placeholder": "5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a09dfe2f-ed1e-4980-89d0-a3a855cb0865",
+      "name": "Research Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.1,
+      "position": [
+        -736,
+        -1776
+      ],
+      "webhookId": "956461cf-7746-40d3-af48-6df529dd83f0"
+    },
+    {
+      "parameters": {
+        "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(i => i >= 0);\n    if (!starts.length) throw firstError;\n\n    const start = Math.min(...starts);\n    const end = cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}');\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet parsed;\ntry {\n  parsed = parseJsonFromOutput($json.output);\n} catch (e) {\n  throw new Error('Could not parse Literature Agent output as JSON: ' + e.message + '\\nRaw output: ' + String($json.output || '').slice(0, 1000));\n}\n\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || '';\nconst requested = parseInt(form['Max papers'] || form.max_papers || 5, 10);\nconst maxPapers = Number.isFinite(requested) && requested > 0 ? requested : 5;\nconst papers = Array.isArray(parsed) ? parsed : (parsed.papers || parsed.results || []);\n\nif (!papers.length) {\n  throw new Error('Literature Agent returned no papers. Check the tool calls and the agent output JSON shape.');\n}\n\nreturn papers.slice(0, maxPapers).map(function (paper) {\n  return {\n    json: {\n      topic,\n      title: paper.title || '',\n      authors: Array.isArray(paper.authors) ? paper.authors : (paper.authors ? String(paper.authors).split(/,\\s*/) : []),\n      year: paper.year || null,\n      abstract: paper.abstract || paper.summary || paper.relevance_reason || '',\n      source: paper.source || '',\n      url: paper.url || paper.link || '',\n      doi: paper.doi || null,\n      citations: paper.citations ?? paper.citation_count ?? null,\n      relevance_reason: paper.relevance_reason || '',\n      paper_type: paper.paper_type || ''\n    }\n  };\n});\n"
+      },
+      "id": "cf065156-111e-41ae-a7ee-5dd9c93dc195",
+      "name": "Normalize Literature Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -176,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(function (i) { return i >= 0; });\n    if (!starts.length) throw firstError;\n\n    const start = Math.min.apply(null, starts);\n    const open = cleaned[start];\n    const close = open === '[' ? ']' : '}';\n    const end = cleaned.lastIndexOf(close);\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet summary;\ntry {\n  summary = parseJsonFromOutput($json.output);\n} catch (e) {\n  const raw = cleanAgentOutput($json.output);\n  summary = {\n    error: 'parse failed',\n    details: e.message,\n    raw: raw.slice(0, 2000),\n    problem: 'N/A',\n    method: 'N/A',\n    dataset: 'N/A',\n    architecture: 'N/A',\n    results: 'N/A',\n    limitations: 'N/A',\n    novelty: 'N/A'\n  };\n}\n\nsummary = summary && typeof summary === 'object' && !Array.isArray(summary) ? summary : { raw: summary };\n\nreturn {\n  json: Object.assign({}, summary, {\n    _meta: {\n      title: summary.title || 'Untitled',\n      authors: Array.isArray(summary.authors) ? summary.authors : (summary.authors ? String(summary.authors).split(/,\\s*/) : []),\n      year: summary.year || null,\n      citations: summary.citations == null ? null : summary.citations,\n      url: summary.url || '',\n      source: summary.source || '',\n      doi: summary.doi || null,\n      relevance_reason: summary.relevance_reason || '',\n      paper_type: summary.paper_type || ''\n    }\n  })\n};\n"
+      },
+      "id": "0656aaaa-b516-495b-9c7b-41b5e190f385",
+      "name": "Parse Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst summaries = items.map(function (i) { return i.json; });\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || '';\nreturn [{ json: { topic: topic, summaries: summaries, paper_count: summaries.length } }];\n"
+      },
+      "id": "8d338751-9d06-4235-87c1-95c7537ffd3e",
+      "name": "Aggregate Summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(i => i >= 0);\n    if (!starts.length) throw firstError;\n\n    const start = Math.min(...starts);\n    const end = cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}');\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet comparison;\ntry {\n  comparison = parseJsonFromOutput($json.output);\n} catch (e) {\n  comparison = { error: 'parse failed', raw: $json.output, details: e.message };\n}\n\nreturn [{ json: comparison }];\n"
+      },
+      "id": "8c24a39e-c69c-4543-9710-08f0323494a1",
+      "name": "Parse Comparison",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(i => i >= 0);\n    if (!starts.length) throw firstError;\n\n    const start = Math.min(...starts);\n    const end = cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}');\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet hyp;\ntry {\n  hyp = parseJsonFromOutput($json.output);\n} catch (e) {\n  hyp = { error: 'parse failed', raw: $json.output, details: e.message };\n}\n\nreturn [{ json: hyp }];\n"
+      },
+      "id": "d9e5da24-45dc-41a1-9f95-885ab0fefc7e",
+      "name": "Parse Hypothesis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2224,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Report — assemble the final markdown and emit as binary for the file-writer.\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || 'Unknown topic';\n\nconst agg = $('Aggregate Summaries').first().json;\nconst summaries = agg.summaries || [];\n\nconst comparison = $('Parse Comparison').first().json || {};\nconst hyp = $json || {};\n\nconst date = new Date().toISOString().slice(0, 10);\n\nfunction esc(s) { return (s == null ? '' : String(s)); }\nfunction authorLine(meta) {\n  const a = (meta && meta.authors) || [];\n  if (a.length === 0) return 'Unknown authors';\n  if (a.length <= 4) return a.join(', ');\n  return a.slice(0, 4).join(', ') + ' et al.';\n}\n\nlet md = '';\nmd += '# Research Report: ' + topic + '\\n\\n';\nmd += '_Generated ' + date + ' by the Multi-Agent Research Assistant._\\n\\n';\nmd += '---\\n\\n';\n\nmd += '## 1. Literature Summary\\n\\n';\nmd += 'Reviewed **' + summaries.length + '** papers across arXiv, Semantic Scholar, and OpenAlex.\\n\\n';\nfor (const s of summaries) {\n  const meta = s._meta || {};\n  md += '### ' + esc(meta.title || s.title || 'Untitled') + '\\n';\n  md += '*' + authorLine(meta) + ' (' + esc(meta.year || 'n.d.') + ')';\n  if (meta.citations != null) md += ' · ' + meta.citations + ' citations';\n  md += ' · ' + esc(meta.source || '');\n  if (meta.url) md += ' · [link](' + meta.url + ')';\n  md += '*\\n\\n';\n  md += '- **Problem:** ' + esc(s.problem) + '\\n';\n  md += '- **Method:** ' + esc(s.method) + '\\n';\n  md += '- **Dataset:** ' + esc(s.dataset) + '\\n';\n  md += '- **Architecture:** ' + esc(s.architecture) + '\\n';\n  md += '- **Results:** ' + esc(s.results) + '\\n';\n  md += '- **Limitations:** ' + esc(s.limitations) + '\\n';\n  md += '- **Novelty:** ' + esc(s.novelty) + '\\n\\n';\n}\n\nmd += '## 2. Comparison\\n\\n';\nmd += (comparison.table_markdown || '_No comparison table generated._') + '\\n\\n';\n\nif (comparison.clusters && comparison.clusters.length) {\n  md += '### Clusters\\n\\n';\n  for (const c of comparison.clusters) {\n    md += '- **' + esc(c.name) + '** — ' + esc(c.common_thread || '') + '\\n';\n    md += '  - Papers: ' + (c.papers || []).join(', ') + '\\n';\n  }\n  md += '\\n';\n}\n\nif (comparison.observations) {\n  md += '### Cross-paper Observations\\n\\n' + comparison.observations + '\\n\\n';\n}\n\nmd += '## 3. Research Gaps\\n\\n';\nfor (const g of (hyp.research_gaps || [])) md += '- ' + esc(g) + '\\n';\nif (!(hyp.research_gaps && hyp.research_gaps.length)) md += '_(none identified)_\\n';\nmd += '\\n';\n\nmd += '## 4. Proposed Hypothesis\\n\\n';\nif (hyp.hypothesis) {\n  md += '> **' + esc(hyp.hypothesis.statement) + '**\\n\\n';\n  md += esc(hyp.hypothesis.rationale) + '\\n\\n';\n}\n\nmd += '## 5. Experiment Plan\\n\\n';\nconst ep = hyp.experiment_plan || {};\nmd += '**Objective:** ' + esc(ep.objective) + '\\n\\n';\nmd += '**Dataset / simulation:** ' + esc(ep.dataset_or_simulation) + '\\n\\n';\nif ((ep.baselines || []).length) {\n  md += '**Baselines:**\\n';\n  for (const b of ep.baselines) md += '- ' + esc(b) + '\\n';\n  md += '\\n';\n}\nif ((ep.metrics || []).length) {\n  md += '**Metrics:**\\n';\n  for (const m of ep.metrics) md += '- ' + esc(m) + '\\n';\n  md += '\\n';\n}\nif ((ep.implementation_steps || []).length) {\n  md += '**Implementation steps:**\\n';\n  ep.implementation_steps.forEach(function (step, i) { md += (i + 1) + '. ' + esc(step) + '\\n'; });\n  md += '\\n';\n}\n\nmd += '## 6. Risks & Caveats\\n\\n';\nfor (const r of (hyp.risks || [])) md += '- ' + esc(r) + '\\n';\nif (!(hyp.risks && hyp.risks.length)) md += '_(none identified)_\\n';\nmd += '\\n---\\n\\n_End of report._\\n';\n\nconst safeSlug = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);\nconst filename = 'report-' + date + '-' + safeSlug + '.md';\n\nconst binary = await this.helpers.prepareBinaryData(Buffer.from(md, 'utf-8'), filename, 'text/markdown');\n\nreturn [{\n  json: { topic: topic, filename: filename, paper_count: summaries.length },\n  binary: { data: binary },\n}];\n"
+      },
+      "id": "9fce6245-7ea6-48a1-8668-069521660dc1",
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Literature Search Agent in a multi-agent research team.\n\nResearch topic: {{ $json[\"Research topic\"] }}\nMax papers requested: {{ $json[\"Max papers\"] || 5 }}\n\nUse the connected academic search tools. Start with arXiv. If more tools are connected, query at least two sources.\n\nSelect the most useful papers for a literature review. Prefer relevant, recent, high-quality work, but include foundational papers when they are clearly central. Remove duplicates and irrelevant papers. Do not invent papers.\n\nReturn ONLY valid JSON with this exact shape, with no markdown fences or commentary:\n{\n  \"papers\": [\n    {\n      \"title\": \"paper title\",\n      \"authors\": [\"author name\"],\n      \"year\": 2024,\n      \"abstract\": \"abstract or concise tool-derived summary\",\n      \"source\": \"arXiv / Semantic Scholar / OpenAlex / other\",\n      \"url\": \"source URL\",\n      \"doi\": null,\n      \"citations\": null,\n      \"relevance_reason\": \"why this paper belongs in the review\",\n      \"paper_type\": \"foundational / recent / survey / experimental / application\"\n    }\n  ]\n}\n\nNever return more than the requested Max papers. If a field is unavailable, use null.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -512,
+        -1296
+      ],
+      "id": "998504b5-03e7-4e18-94e2-baa0a639b416",
+      "name": "Literature Agent"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Search arXiv for academic papers. Use this for computer science, AI, ML, multi-agent systems, robotics, and systems research. The query should be URL-safe plain keywords.",
+        "url": "=http://export.arxiv.org/api/query?search_query=all:{{encodeURIComponent($fromAI(\"query\"))}}&start=0&max_results=10&sortBy=relevance&sortOrder=descending",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -416,
+        -1584
+      ],
+      "id": "2e1be020-76f4-4b65-840c-2a5d5d6e0772",
+      "name": "arXiv"
+    },
+    {
+      "parameters": {
+        "model": "qwen/qwen3-32b",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        -1520
+      ],
+      "id": "babb5a55-79ae-45f7-b251-79d54b30018d",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "y6QKqGU7XOQ5d3vj",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        128,
+        -1520
+      ],
+      "id": "e1747d42-04f2-499d-bb7c-12b4ad6e039e",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "y6QKqGU7XOQ5d3vj",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Paper Summarization Agent in a research team.\n\nRead this paper metadata and produce a terse, factual structured summary. If a field is not derivable from the title/abstract/metadata, write \"N/A\" rather than guessing.\n\nTitle: {{ $json.title }}\nAuthors: {{ ($json.authors || []).join(', ') }}\nYear: {{ $json.year }}\nSource: {{ $json.source }}\nURL: {{ $json.url }}\nDOI: {{ $json.doi }}\nCitations: {{ $json.citations }}\nPaper type: {{ $json.paper_type }}\nRelevance reason: {{ $json.relevance_reason }}\n\nAbstract:\n{{ $json.abstract || '(no abstract available)' }}\n\nReturn ONLY valid JSON with exactly these fields, no markdown fences:\n{\n  \"title\": {{ JSON.stringify($json.title || '') }},\n  \"authors\": {{ JSON.stringify($json.authors || []) }},\n  \"year\": {{ $json.year || null }},\n  \"source\": {{ JSON.stringify($json.source || '') }},\n  \"url\": {{ JSON.stringify($json.url || '') }},\n  \"doi\": {{ JSON.stringify($json.doi || null) }},\n  \"citations\": {{ $json.citations == null ? 'null' : $json.citations }},\n  \"relevance_reason\": {{ JSON.stringify($json.relevance_reason || '') }},\n  \"paper_type\": {{ JSON.stringify($json.paper_type || '') }},\n  \"problem\": \"what problem the paper addresses (1-2 sentences)\",\n  \"method\": \"the methodology or approach (1-2 sentences)\",\n  \"dataset\": \"dataset(s) used, or N/A\",\n  \"architecture\": \"model/system architecture, or N/A\",\n  \"results\": \"key results, including numbers when stated\",\n  \"limitations\": \"stated or apparent limitations\",\n  \"novelty\": \"what is novel about this work vs prior art\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        96,
+        -1296
+      ],
+      "id": "b2d7a128-beef-4994-8f53-76438b1b8a93",
+      "name": "Summarization Agent"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1152,
+        -1488
+      ],
+      "id": "806ce7f5-35bc-4efd-b8e5-c9ab415f84ed",
+      "name": "Groq Chat Model2",
+      "credentials": {
+        "groqApi": {
+          "id": "y6QKqGU7XOQ5d3vj",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        -1504
+      ],
+      "id": "194228b0-c428-4564-b295-88dcb1134117",
+      "name": "Groq Chat Model3",
+      "credentials": {
+        "groqApi": {
+          "id": "y6QKqGU7XOQ5d3vj",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Search OpenAlex works for broad academic coverage. Query should be plain keywords.",
+        "url": "=https://api.openalex.org/works?search={{encodeURIComponent($fromAI(\"query\"))}}&per_page=10&sort=relevance_score:desc",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        -320,
+        -1520
+      ],
+      "id": "f4db62fe-75f3-4796-be8c-de3e0522fc9d",
+      "name": "OpenAlex"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: $json }];\n"
+      },
+      "id": "e1147558-9846-4fdc-bd12-2d33308fcd78",
+      "name": "Prepare Comparison Context1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const agg = $('Aggregate Summaries').first().json;\nreturn [{ json: { topic: agg.topic, summaries: agg.summaries, comparison: $json } }];\n"
+      },
+      "id": "49b1b925-ab03-42c6-aaaa-11bcdfd5b509",
+      "name": "Prepare Hypothesis Context1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        -1776
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Comparison Agent in a research team. Given structured summaries of papers on a single topic, produce a comparison that helps a researcher quickly see how the papers relate.\n\nTopic: {{ $json.topic }}\n\nSummaries JSON:\n{{ JSON.stringify($json.summaries, null, 2) }}\n\nReturn ONLY valid JSON with exactly these fields, no markdown fences:\n{\n  \"table_markdown\": \"a GitHub-flavored markdown table with columns: | Paper | Method | Dataset | Strength | Weakness | Novelty |. Use short paper labels (first author + year). One row per paper, max 12 words per cell.\",\n  \"clusters\": [ { \"name\": \"cluster label\", \"papers\": [\"label\", \"label\"], \"common_thread\": \"1 sentence\" } ],\n  \"observations\": \"3-5 short paragraphs of cross-paper observations: trends, disagreements, evolution over time, dominant datasets, methodological tradeoffs.\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1152,
+        -1312
+      ],
+      "id": "8934de07-00f0-4037-a4a6-49c48f4e6083",
+      "name": "Comparison Agent1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the Hypothesis Generation Agent in a research team. Based on the literature analysis below, identify research gaps and propose a novel, testable hypothesis with an experiment plan.\n\nTopic: {{ $json.topic }}\n\nPaper summaries JSON:\n{{ JSON.stringify($json.summaries) }}\n\nCross-paper comparison JSON:\n{{ JSON.stringify($json.comparison) }}\n\nGround rules:\n- A gap must point to something the surveyed papers do NOT do. Be specific about what is missing.\n- The hypothesis must be falsifiable.\n- The experiment plan must be runnable by a single team within about 3 months.\n\nReturn ONLY valid JSON with exactly these fields, no markdown fences:\n{\n  \"research_gaps\": [\"3-5 specific gaps, phrased as: No surveyed work does X, even though Y suggests it would matter.\"],\n  \"hypothesis\": { \"statement\": \"one-sentence falsifiable claim\", \"rationale\": \"2-3 sentences linking to specific gaps and cited papers\" },\n  \"experiment_plan\": {\n    \"objective\": \"what success looks like\",\n    \"dataset_or_simulation\": \"concrete named data source or simulator\",\n    \"baselines\": [\"3-5 specific baselines\"],\n    \"metrics\": [\"specific metrics with units\"],\n    \"implementation_steps\": [\"ordered concrete steps\"]\n  },\n  \"risks\": [\"3-5 concrete things that could fail or invalidate the experiment\"]\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1904,
+        -1328
+      ],
+      "id": "6740037d-1973-48ff-bb96-910f831edb9c",
+      "name": "Hypothesis Agent1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Research Form": {
+      "main": [
+        [
+          {
+            "node": "Literature Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Literature Agent": {
+      "main": [
+        [
+          {
+            "node": "Normalize Literature Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Literature Results": {
+      "main": [
+        [
+          {
+            "node": "Summarization Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarization Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Summary": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Summaries": {
+      "main": [
+        [
+          {
+            "node": "Prepare Comparison Context1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Comparison": {
+      "main": [
+        [
+          {
+            "node": "Prepare Hypothesis Context1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Hypothesis": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        []
+      ]
+    },
+    "arXiv": {
+      "ai_tool": [
+        [
+          {
+            "node": "Literature Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAlex": {
+      "ai_tool": [
+        [
+          {
+            "node": "Literature Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Literature Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Summarization Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Comparison Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Hypothesis Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Comparison Context1": {
+      "main": [
+        [
+          {
+            "node": "Comparison Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Hypothesis Context1": {
+      "main": [
+        [
+          {
+            "node": "Hypothesis Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comparison Agent1": {
+      "main": [
+        [
+          {
+            "node": "Parse Comparison",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hypothesis Agent1": {
+      "main": [
+        [
+          {
+            "node": "Parse Hypothesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "44c83478-de71-4422-bc36-e53d96cb74b2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b0987ebbba1e154d25ba6bd2918b835a24324356a2dbdc592c10a73378510ebb"
+  },
+  "id": "tU2OXlBUL15bh7Sw",
+  "tags": []
+}
