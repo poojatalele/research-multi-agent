@@ -11,19 +11,18 @@ Research Form
   -> Summarization Agent
   -> Parse Summary
   -> Aggregate Summaries
-  -> Prepare Comparison Context
-  -> Comparison Agent
-  -> Parse Comparison
-  -> Prepare Hypothesis Context
-  -> Hypothesis Agent
-  -> Parse Hypothesis
+  -> Prepare Comparison Context -> Comparison Agent -> Parse Comparison
+  -> Prepare Hypothesis Context -> Hypothesis Agent -> Parse Hypothesis
+  -> Merge Agent Results
   -> Build Report
   -> Write Report
 ```
 
+`Comparison Agent` and `Hypothesis Agent` run as sibling branches from the same aggregated summaries. `Merge Agent Results` is only a synchronization point; `Build Report` reads the parsed outputs by node name.
+
 ## Agent Nodes
 
-- **Literature Agent** uses connected LangChain tools: `arXiv`, `Semantic Scholar`, and `OpenAlex`.
+- **Literature Agent** uses connected LangChain tools. `Semantic Scholar` and `OpenAlex` are enabled by default. `arXiv` is left on the canvas but disabled to avoid rate-limit errors during repeated testing.
 - **Summarization Agent** receives one normalized paper per item and returns summary JSON in `$json.output`.
 - **Comparison Agent** receives the aggregated summaries and returns comparison JSON in `$json.output`.
 - **Hypothesis Agent** receives summaries plus comparison JSON and returns gaps, hypothesis, experiment plan, and risks in `$json.output`.
@@ -40,6 +39,7 @@ The old REST workflow returns Gemini responses under `candidates[0].content.part
 - Do not leave `hasOutputParser` enabled unless an actual output parser node is connected.
 - Keep the search source calls as `httpRequestTool` nodes connected to the Literature Agent's `ai_tool` input.
 - Keep `Normalize Literature Results` between Literature Agent and Summarization Agent; it turns the single search-agent JSON response into one item per paper.
+- Avoid reconnecting `arXiv` while testing repeatedly. If you need it, reconnect it as a fallback tool and keep `Max papers` low.
 
 ## Provider Notes
 
