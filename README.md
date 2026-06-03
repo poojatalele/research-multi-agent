@@ -1,120 +1,229 @@
-# Multi-Agent Research Assistant (n8n + Gemini)
+# Multi-Agent Research Assistant
 
-A small team of cooperating agents that, given a research topic, search the literature, summarize papers, compare methods, surface gaps, and propose a hypothesis with an experiment plan. Runs locally in n8n.
+An n8n LangChain workflow that researches a topic, searches OpenAlex for academic papers, summarizes the selected papers, compares them, proposes a testable hypothesis, and produces a downloadable markdown report.
 
-## MVP scope
+The source workflow is:
 
-| # | Agent | Implemented? |
-|---|---|---|
-| 1 | Literature Search (arXiv + Semantic Scholar + OpenAlex) | yes |
-| 2 | Paper Summarizer (Gemini) | yes |
-| 3 | Citation Graph | not yet |
-| 4 | Comparator (Gemini) | yes |
-| 5 | Hypothesis + Experiment Planner (Gemini) | yes |
-| 6 | Experiment Planner (standalone) | folded into Agent 5 |
-| 7 | Peer Review | not yet |
+`workflows/Multi-Agent Research Assistant (MVP) - LangChain (1).json`
 
-See [`docs/architecture.md`](docs/architecture.md) for the data flow.
+## What This Project Contains
 
-## Chosen MVP
+- `workflows/` - the importable n8n workflow JSON.
+- `reports/.gitkeep` - placeholder output folder. The current workflow does not write here automatically.
+- `.env.example` - environment settings used by Docker or `start-n8n.sh`.
+- `start-n8n.sh` - optional local n8n launcher if n8n is installed on your machine.
+- `README.md` - setup and run instructions.
 
-Use the n8n Agent + tool workflow as the main MVP. It is easier to explain and demonstrate because the canvas reads like a research team:
+## Workflow Shape
 
-`Research Form -> Literature Agent -> Summarization Agent -> Comparator Agent -> Hypothesis Agent -> Build Report -> Write Report`
-
-Keep [`workflows/research-mvp.json`](workflows/research-mvp.json) as the older deterministic REST reference. It is useful for debugging Gemini request shapes, but the agent workflow should not be mixed with the REST workflow nodes. See [`docs/agent-workflow.md`](docs/agent-workflow.md) for the clean agent version.
-
-## Prerequisites
-
-- Node.js, if running with `./start-n8n.sh`
-- Docker Desktop, if running with Docker
-- A Gemini API key — get one free at https://aistudio.google.com/apikey
-
-## Setup
-
-### Option A: Docker
-
-This is the setup currently used on this machine:
-
-```bash
-cd /Users/syedanoorain/Downloads/research-multi-agent
-docker run -d --name n8n -p 5678:5678 --env-file .env \
-  -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
-  -e N8N_RUNNERS_ENABLED=true \
-  -e N8N_SECURE_COOKIE=false \
-  -v n8n_data:/home/node/.n8n \
-  docker.n8n.io/n8nio/n8n
+```text
+Research Form
+  -> Literature Agent
+  -> Normalize Literature Results
+  -> Summarization Agent
+  -> Parse Summary
+  -> Aggregate Summaries
+  -> Comparison Agent1 -> Parse Comparison
+  -> Hypothesis Agent1 -> Parse Hypothesis
+  -> Merge Agent Results
+  -> Build Report
 ```
 
-Open `http://localhost:5678`.
+`Build Report` is the final node. It creates a markdown file as binary output named like:
 
-### Option B: Local n8n
+```text
+report-2026-06-03-your-topic.md
+```
+
+Download that file directly from the `Build Report` node output in n8n.
+
+## Requirements
+
+- Docker Desktop.
+- An OpenRouter account and API key.
+- This project folder on your machine.
+
+The workflow uses OpenRouter Chat Model nodes with:
+
+```text
+openrouter/free
+```
+
+That lets OpenRouter choose an available free model for the request.
+
+## 1. Prepare The Environment File
+
+From the project root:
 
 ```bash
 cd /Users/syedanoorain/Downloads/research-multi-agent
 cp .env.example .env
-# Open .env and paste your GEMINI_API_KEY
+```
+
+You do not need to put the OpenRouter key in `.env`. n8n stores that key as a credential in the UI.
+
+## 2. Start n8n With Docker
+
+Create a persistent Docker volume for n8n data:
+
+```bash
+docker volume create n8n_data
+```
+
+Start n8n:
+
+```bash
+docker run -d --name research-n8n \
+  -p 5678:5678 \
+  --env-file .env \
+  -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
+  -e N8N_RUNNERS_ENABLED=true \
+  -e N8N_SECURE_COOKIE=false \
+  -v n8n_data:/home/node/.n8n \
+  docker.n8n.io/n8nio/n8n:latest
+```
+
+Watch the logs until n8n is ready:
+
+```bash
+docker logs -f research-n8n
+```
+
+Open n8n:
+
+```text
+http://localhost:5678
+```
+
+On first launch, n8n will ask you to create a local owner account. This account is for your local n8n instance.
+
+## 3. Import The Workflow
+
+1. Open `http://localhost:5678`.
+2. Go to **Workflows**.
+3. Choose **Import from File**.
+4. Select:
+
+```text
+workflows/Multi-Agent Research Assistant (MVP) - LangChain (1).json
+```
+
+5. Open the imported workflow.
+
+## 4. Add OpenRouter Credentials
+
+1. In n8n, open any **OpenRouter Chat Model** node.
+2. In **Credential for OpenRouter API**, create a new credential.
+3. Paste your OpenRouter API key.
+4. Save the credential.
+5. Select the same credential for all four model nodes:
+   - `OpenRouter Chat Model`
+   - `OpenRouter Chat Model1`
+   - `OpenRouter Chat Model2`
+   - `OpenRouter Chat Model3`
+
+Leave the model value as:
+
+```text
+openrouter/free
+```
+
+Save the workflow after assigning credentials.
+
+## 5. Run A Test
+
+Start small first:
+
+1. Click the **Research Form** node.
+2. Click **Execute step**.
+3. n8n will show a form URL.
+4. Open the form URL in your browser.
+5. Enter a topic, for example:
+
+```text
+multi-agent systems for smart agriculture
+```
+
+6. Set **Max papers** to `1` for the first test.
+7. Submit the form.
+8. Wait for the workflow execution to finish.
+
+After the first successful test, increase **Max papers** to `3` or `5`.
+
+## 6. Download The Report
+
+The workflow does not use a final file-write node.
+
+To download the report:
+
+1. Open the finished execution in n8n.
+2. Click the final **Build Report** node.
+3. Open its output panel.
+4. Look for the binary output named `data`.
+5. Download the markdown file from that binary output.
+
+The downloaded file will use the generated report filename shown in the node JSON output.
+
+## Docker Commands
+
+Check running containers:
+
+```bash
+docker ps
+```
+
+View n8n logs:
+
+```bash
+docker logs -f research-n8n
+```
+
+Stop n8n:
+
+```bash
+docker stop research-n8n
+```
+
+Start it again:
+
+```bash
+docker start research-n8n
+```
+
+Remove the container:
+
+```bash
+docker rm research-n8n
+```
+
+If the container name already exists and you want a fresh container:
+
+```bash
+docker rm -f research-n8n
+```
+
+Then rerun the Docker start command from step 2.
+
+## Optional Local n8n
+
+If you have `n8n` installed globally, you can run:
+
+```bash
 ./start-n8n.sh
 ```
 
-First launch downloads n8n (~300MB) and may take a minute. When you see "Editor is now accessible via http://localhost:5678", open that URL.
+This loads `.env`, keeps local n8n data in `.n8n/`, and starts n8n at:
 
-n8n will ask you to create a local account on first run (email + password — stays on your machine).
+```text
+http://localhost:5678
+```
 
-## Build the workflow
-
-In the n8n UI:
-
-1. Create a new workflow.
-2. Build the agent-native canvas described in [`docs/agent-workflow.md`](docs/agent-workflow.md).
-3. Keep [`workflows/research-mvp.json`](workflows/research-mvp.json) open as a reference for report formatting and field names.
-4. Click **Save** (top right).
-
-The final canvas should read as one clean chain: form, literature search agent, paper normalization, summarization agent, aggregation, comparator agent, hypothesis agent, report builder, file writer.
-
-## Run it
-
-1. Click the **Research Form** node → **Execute step** → it gives you a form URL (something like `http://localhost:5678/form/research-topic-form`).
-2. Open that URL in a browser. Enter your topic ("multi-agent systems for smart agriculture") and max papers (default 10).
-3. Submit. The workflow runs end-to-end — usually 1–3 minutes for 10 papers.
-4. The final report is written to [`reports/`](reports/) as a markdown file like `report-2026-05-19-multi-agent-systems-for-smart-agriculture.md`.
-
-You can also click any node in the n8n editor while it's running to inspect what came in and out — useful when debugging a prompt or a parse.
-
-## Editing the prompts
-
-For the agent workflow, prompts live directly inside the n8n Agent nodes:
-
-- **Literature Agent** uses tool calls to search sources and returns a strict JSON paper list.
-- **Summarization Agent** receives papers and returns one structured summary per paper.
-- **Comparator Agent** receives all summaries and returns a comparison table plus clusters.
-- **Hypothesis Agent** receives summaries plus comparison output and returns gaps, hypothesis, experiment plan, and risks.
-
-The older REST workflow keeps prompts inside `Build * Request` Code nodes:
-
-- **Agent 2** prompt — in node *Build Summarize Request*
-- **Agent 4** prompt — in node *Build Compare Request*
-- **Agent 5** prompt — in node *Build Hypothesis Request*
-
-Source-of-truth copies live in [`prompts/`](prompts/) so you can iterate on them with version control. After editing a prompt in n8n, paste it back into the corresponding `prompts/*.md` file.
-
-## Tuning the search
-
-For the agent workflow, tune search inside the **Literature Agent** prompt and its connected search tool nodes. Start with arXiv only, `Max papers = 3`, then add Semantic Scholar/OpenAlex once the end-to-end report works. See [`prompts/01-search.md`](prompts/01-search.md) for the older deterministic search logic and useful ranking ideas.
-
-## Cost note
-
-10 papers → ~12 Gemini calls (10 summaries + 1 comparison + 1 hypothesis). On Gemini 2.5 Flash that's well within free-tier limits (15 RPM / 1500 RPD as of early 2026). Run as much as you want.
-
-## Adding the missing agents
-
-- **Agent 3 (Citation graph)** — drop a new Code node between Aggregate Summaries and Build Compare Request. For each summary's DOI, call `https://api.semanticscholar.org/graph/v1/paper/{doi}/references?limit=20`. Build an adjacency map. Feed it into the comparison prompt as additional context.
-- **Agent 7 (Peer Review)** — add Build Review Request → Review HTTP → Parse Review nodes after Build Report. Feed the assembled markdown to Gemini with a "find weak assumptions, missing baselines, unrealistic claims" prompt.
+Docker is the recommended path for checking the project.
 
 ## Troubleshooting
 
-- **`GEMINI_API_KEY` is empty / 401 from Gemini** — verify `.env` is set and that you launched via `./start-n8n.sh` (not raw `npx n8n`, which won't load `.env`). The flag `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` must be set for `{{ $env.GEMINI_API_KEY }}` to resolve.
-- **Empty / mangled JSON from Gemini** — usually a too-long abstract that ran into the token limit. Lower `max_papers`, or trim abstracts in the Search Agent before they hit the Summarizer.
-- **arXiv or Semantic Scholar 429** — rate limits. Wait a minute, or get a Semantic Scholar key and put it in `S2_API_KEY`.
-- **`this.helpers.httpRequest is not a function`** — older n8n versions used a different helper API. Update n8n: `npx --yes n8n@latest`.
-- **Report not written, but workflow shows green** — check `REPORTS_DIR` is exported (the start script does it). Look at the **Write Report** node output for the resolved path.
+- **Provider returned error / Service unavailable:** `openrouter/free` depends on currently available free models. Wait a bit and run again, or choose a specific OpenRouter model in each Chat Model node.
+- **Credential error:** reselect your OpenRouter credential on all four OpenRouter Chat Model nodes.
+- **No useful papers returned:** try a more specific topic and run with `Max papers = 1`.
+- **JSON parse error:** reduce `Max papers`, then rerun. Free models can occasionally return text around the JSON.
+- **No file in `reports/`:** expected. The final report is downloaded from the `Build Report` node output, not written to disk.

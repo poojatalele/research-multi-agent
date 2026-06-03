@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 if [ ! -f .env ]; then
-  echo "No .env found. Copy .env.example to .env and fill in GEMINI_API_KEY first."
+  echo "No .env found. Copy .env.example to .env first."
   exit 1
 fi
 
@@ -18,9 +18,7 @@ set +a
 
 # Keep n8n data inside the project so it's portable
 export N8N_USER_FOLDER="$(pwd)/.n8n"
-export REPORTS_DIR="$(pwd)/reports"
 mkdir -p "$N8N_USER_FOLDER"
-mkdir -p "$REPORTS_DIR"
 
 # Allow workflows to read env vars via {{ $env.X }}
 export N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-false}
@@ -36,7 +34,7 @@ fi
 
 echo "Starting n8n at http://localhost:5678"
 echo "Data folder: $N8N_USER_FOLDER"
-echo "Reports will be written to: $REPORTS_DIR"
+echo "Reports are downloaded from the Build Report node output."
 echo ""
 
 exec n8n
