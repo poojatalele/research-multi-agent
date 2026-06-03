@@ -22,37 +22,11 @@ This project solves that problem with a small multi-agent workflow in n8n. The u
 - **Hypothesis Agent**: identifies research gaps and proposes a falsifiable hypothesis with an experiment plan.
 - **Build Report node**: assembles the final markdown report as downloadable binary output.
 
-## Workflow
-
-```text
-Research Form
-  -> Literature Agent
-  -> Normalize Literature Results
-  -> Summarization Agent
-  -> Parse Summary
-  -> Aggregate Summaries
-  -> Comparison Agent1 -> Parse Comparison
-  -> Hypothesis Agent1 -> Parse Hypothesis
-  -> Merge Agent Results
-  -> Build Report
-```
-
-`Build Report` is the final node. It does not write to a local folder. Download the generated markdown file directly from the `Build Report` node output in n8n.
-
-## Requirements
-
-- Docker Desktop
-- OpenRouter API key
-- This repository
-
-Credentials are configured in the n8n UI, so no `.env` file is required.
-
 ## Start n8n With Docker
 
 From the project root:
 
 ```bash
-cd /Users/syedanoorain/Downloads/research-multi-agent
 docker volume create n8n_data
 docker run -d --name research-n8n \
   -p 5678:5678 \
@@ -92,15 +66,7 @@ openrouter/free
 2. Click **Research Form**.
 3. Click **Execute step**.
 4. Open the form URL shown by n8n.
-5. Enter a topic and set **Max papers** to `1` for the first test.
+5. Enter a topic and set **Max papers**.
 6. Submit the form and wait for the workflow to finish.
 7. Open the final **Build Report** node.
 8. Download the markdown file from the binary output named `data`.
-
-After the first successful run, try `Max papers = 3` or `5`.
-
-## Notes
-
-- The workflow uses `openrouter/free`, so availability depends on OpenRouter's currently available free models.
-- If the provider returns a temporary error, run again later or choose a specific OpenRouter model in the four Chat Model nodes.
-- The `reports/` folder is only a placeholder. The report is downloaded from n8n, not written to disk.
