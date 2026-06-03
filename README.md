@@ -1,20 +1,28 @@
 # Multi-Agent Research Assistant
 
-An n8n LangChain workflow that researches a topic, searches OpenAlex for academic papers, summarizes the selected papers, compares them, proposes a testable hypothesis, and produces a downloadable markdown report.
+An n8n workflow that helps a researcher go from a broad topic to a concise literature report. It searches academic papers, summarizes the selected work, compares methods, identifies gaps, and proposes a testable research hypothesis.
 
-The source workflow is:
+The workflow file is:
 
-`workflows/Multi-Agent Research Assistant (MVP) - LangChain (1).json`
+```text
+workflows/Multi-Agent Research Assistant (MVP) - LangChain (1).json
+```
 
-## What This Project Contains
+## Problem Statement
 
-- `workflows/` - the importable n8n workflow JSON.
-- `reports/.gitkeep` - placeholder output folder. The current workflow does not write here automatically.
-- `.env.example` - environment settings used by Docker or `start-n8n.sh`.
-- `start-n8n.sh` - optional local n8n launcher if n8n is installed on your machine.
-- `README.md` - setup and run instructions.
+Researchers often spend a lot of time doing the same early-stage literature review work: searching for relevant papers, extracting the main contribution from each paper, comparing methods, finding gaps, and turning those gaps into an experiment idea.
 
-## Workflow Shape
+This project solves that problem with a small multi-agent workflow in n8n. The user enters a research topic, and the workflow produces a downloadable markdown report containing paper summaries, comparison notes, research gaps, a proposed hypothesis, and an experiment plan.
+
+## Agents Used
+
+- **Literature Agent**: searches OpenAlex and selects relevant papers for the topic.
+- **Summarization Agent**: summarizes each selected paper into structured fields such as problem, method, dataset, results, limitations, and novelty.
+- **Comparison Agent**: compares all paper summaries and groups related approaches.
+- **Hypothesis Agent**: identifies research gaps and proposes a falsifiable hypothesis with an experiment plan.
+- **Build Report node**: assembles the final markdown report as downloadable binary output.
+
+## Workflow
 
 ```text
 Research Form
@@ -29,64 +37,30 @@ Research Form
   -> Build Report
 ```
 
-`Build Report` is the final node. It creates a markdown file as binary output named like:
-
-```text
-report-2026-06-03-your-topic.md
-```
-
-Download that file directly from the `Build Report` node output in n8n.
+`Build Report` is the final node. It does not write to a local folder. Download the generated markdown file directly from the `Build Report` node output in n8n.
 
 ## Requirements
 
-- Docker Desktop.
-- An OpenRouter account and API key.
-- This project folder on your machine.
+- Docker Desktop
+- OpenRouter API key
+- This repository
 
-The workflow uses OpenRouter Chat Model nodes with:
+Credentials are configured in the n8n UI, so no `.env` file is required.
 
-```text
-openrouter/free
-```
-
-That lets OpenRouter choose an available free model for the request.
-
-## 1. Prepare The Environment File
+## Start n8n With Docker
 
 From the project root:
 
 ```bash
 cd /Users/syedanoorain/Downloads/research-multi-agent
-cp .env.example .env
-```
-
-You do not need to put the OpenRouter key in `.env`. n8n stores that key as a credential in the UI.
-
-## 2. Start n8n With Docker
-
-Create a persistent Docker volume for n8n data:
-
-```bash
 docker volume create n8n_data
-```
-
-Start n8n:
-
-```bash
 docker run -d --name research-n8n \
   -p 5678:5678 \
-  --env-file .env \
   -e N8N_BLOCK_ENV_ACCESS_IN_NODE=false \
   -e N8N_RUNNERS_ENABLED=true \
   -e N8N_SECURE_COOKIE=false \
   -v n8n_data:/home/node/.n8n \
   docker.n8n.io/n8nio/n8n:latest
-```
-
-Watch the logs until n8n is ready:
-
-```bash
-docker logs -f research-n8n
 ```
 
 Open n8n:
@@ -95,135 +69,38 @@ Open n8n:
 http://localhost:5678
 ```
 
-On first launch, n8n will ask you to create a local owner account. This account is for your local n8n instance.
+Create the local n8n owner account if this is your first time opening it.
 
-## 3. Import The Workflow
+## Import And Configure
 
-1. Open `http://localhost:5678`.
-2. Go to **Workflows**.
-3. Choose **Import from File**.
-4. Select:
-
-```text
-workflows/Multi-Agent Research Assistant (MVP) - LangChain (1).json
-```
-
-5. Open the imported workflow.
-
-## 4. Add OpenRouter Credentials
-
-1. In n8n, open any **OpenRouter Chat Model** node.
-2. In **Credential for OpenRouter API**, create a new credential.
-3. Paste your OpenRouter API key.
-4. Save the credential.
-5. Select the same credential for all four model nodes:
-   - `OpenRouter Chat Model`
-   - `OpenRouter Chat Model1`
-   - `OpenRouter Chat Model2`
-   - `OpenRouter Chat Model3`
-
-Leave the model value as:
+1. In n8n, go to **Workflows**.
+2. Import the workflow JSON from `workflows/Multi-Agent Research Assistant (MVP) - LangChain (1).json`.
+3. Open any **OpenRouter Chat Model** node.
+4. Create an OpenRouter credential using your OpenRouter API key.
+5. Select that same credential on all four OpenRouter Chat Model nodes.
+6. Keep the model set to:
 
 ```text
 openrouter/free
 ```
 
-Save the workflow after assigning credentials.
+7. Save the workflow.
 
-## 5. Run A Test
+## Run The Workflow
 
-Start small first:
+1. Open the imported workflow.
+2. Click **Research Form**.
+3. Click **Execute step**.
+4. Open the form URL shown by n8n.
+5. Enter a topic and set **Max papers** to `1` for the first test.
+6. Submit the form and wait for the workflow to finish.
+7. Open the final **Build Report** node.
+8. Download the markdown file from the binary output named `data`.
 
-1. Click the **Research Form** node.
-2. Click **Execute step**.
-3. n8n will show a form URL.
-4. Open the form URL in your browser.
-5. Enter a topic, for example:
+After the first successful run, try `Max papers = 3` or `5`.
 
-```text
-multi-agent systems for smart agriculture
-```
+## Notes
 
-6. Set **Max papers** to `1` for the first test.
-7. Submit the form.
-8. Wait for the workflow execution to finish.
-
-After the first successful test, increase **Max papers** to `3` or `5`.
-
-## 6. Download The Report
-
-The workflow does not use a final file-write node.
-
-To download the report:
-
-1. Open the finished execution in n8n.
-2. Click the final **Build Report** node.
-3. Open its output panel.
-4. Look for the binary output named `data`.
-5. Download the markdown file from that binary output.
-
-The downloaded file will use the generated report filename shown in the node JSON output.
-
-## Docker Commands
-
-Check running containers:
-
-```bash
-docker ps
-```
-
-View n8n logs:
-
-```bash
-docker logs -f research-n8n
-```
-
-Stop n8n:
-
-```bash
-docker stop research-n8n
-```
-
-Start it again:
-
-```bash
-docker start research-n8n
-```
-
-Remove the container:
-
-```bash
-docker rm research-n8n
-```
-
-If the container name already exists and you want a fresh container:
-
-```bash
-docker rm -f research-n8n
-```
-
-Then rerun the Docker start command from step 2.
-
-## Optional Local n8n
-
-If you have `n8n` installed globally, you can run:
-
-```bash
-./start-n8n.sh
-```
-
-This loads `.env`, keeps local n8n data in `.n8n/`, and starts n8n at:
-
-```text
-http://localhost:5678
-```
-
-Docker is the recommended path for checking the project.
-
-## Troubleshooting
-
-- **Provider returned error / Service unavailable:** `openrouter/free` depends on currently available free models. Wait a bit and run again, or choose a specific OpenRouter model in each Chat Model node.
-- **Credential error:** reselect your OpenRouter credential on all four OpenRouter Chat Model nodes.
-- **No useful papers returned:** try a more specific topic and run with `Max papers = 1`.
-- **JSON parse error:** reduce `Max papers`, then rerun. Free models can occasionally return text around the JSON.
-- **No file in `reports/`:** expected. The final report is downloaded from the `Build Report` node output, not written to disk.
+- The workflow uses `openrouter/free`, so availability depends on OpenRouter's currently available free models.
+- If the provider returns a temporary error, run again later or choose a specific OpenRouter model in the four Chat Model nodes.
+- The `reports/` folder is only a placeholder. The report is downloaded from n8n, not written to disk.
