@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "path": "9167ec07-0c49-45d8-8312-99ea4abae2e4",
+        "path": "f13cf26f-a014-49be-895f-83dbf8c74993",
         "formTitle": "Multi-Agent Research Assistant",
         "formDescription": "Enter a topic. Agents will search academic sources, summarize the top papers, compare them, and propose a hypothesis with an experiment plan.",
         "formFields": {
@@ -22,27 +22,27 @@
         },
         "options": {}
       },
-      "id": "5d9a95ea-305f-494c-b691-8507c6decdf8",
+      "id": "8a34bca8-36fe-40fa-a9d6-73cdf9b01b87",
       "name": "Research Form",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.1,
       "position": [
-        -368,
-        96
+        0,
+        0
       ],
-      "webhookId": "9167ec07-0c49-45d8-8312-99ea4abae2e4"
+      "webhookId": "f13cf26f-a014-49be-895f-83dbf8c74993"
     },
     {
       "parameters": {
         "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(i => i >= 0);\n    if (!starts.length) throw firstError;\n\n    const start = Math.min(...starts);\n    const end = cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}');\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet parsed;\ntry {\n  parsed = parseJsonFromOutput($json.output);\n} catch (e) {\n  throw new Error('Could not parse Literature Agent output as JSON: ' + e.message + '\\nRaw output: ' + String($json.output || '').slice(0, 1000));\n}\n\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || '';\nconst requested = parseInt(form['Max papers'] || form.max_papers || 5, 10);\nconst maxPapers = Number.isFinite(requested) && requested > 0 ? requested : 5;\nconst papers = Array.isArray(parsed) ? parsed : (parsed.papers || parsed.results || []);\n\nif (!papers.length) {\n  throw new Error('Literature Agent returned no papers. Check the tool calls and the agent output JSON shape.');\n}\n\nreturn papers.slice(0, maxPapers).map(function (paper) {\n  return {\n    json: {\n      topic,\n      title: paper.title || '',\n      authors: Array.isArray(paper.authors) ? paper.authors : (paper.authors ? String(paper.authors).split(/,\\s*/) : []),\n      year: paper.year || null,\n      abstract: paper.abstract || paper.summary || paper.relevance_reason || '',\n      source: paper.source || '',\n      url: paper.url || paper.link || '',\n      doi: paper.doi || null,\n      citations: paper.citations ?? paper.citation_count ?? null,\n      relevance_reason: paper.relevance_reason || '',\n      paper_type: paper.paper_type || ''\n    }\n  };\n});\n"
       },
-      "id": "3ecc438e-8435-4a40-a566-2d7b329a3aae",
+      "id": "f7c597bb-d7dd-4d8b-8bef-e7025e245613",
       "name": "Normalize Literature Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        192,
-        96
+        560,
+        0
       ]
     },
     {
@@ -50,65 +50,65 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(function (i) { return i >= 0; });\n    if (!starts.length) throw firstError;\n\n    const start = Math.min.apply(null, starts);\n    const open = cleaned[start];\n    const close = open === '[' ? ']' : '}';\n    const end = cleaned.lastIndexOf(close);\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet summary;\ntry {\n  summary = parseJsonFromOutput($json.output);\n} catch (e) {\n  const raw = cleanAgentOutput($json.output);\n  summary = {\n    error: 'parse failed',\n    details: e.message,\n    raw: raw.slice(0, 2000),\n    problem: 'N/A',\n    method: 'N/A',\n    dataset: 'N/A',\n    architecture: 'N/A',\n    results: 'N/A',\n    limitations: 'N/A',\n    novelty: 'N/A'\n  };\n}\n\nsummary = summary && typeof summary === 'object' && !Array.isArray(summary) ? summary : { raw: summary };\n\nreturn {\n  json: Object.assign({}, summary, {\n    _meta: {\n      title: summary.title || 'Untitled',\n      authors: Array.isArray(summary.authors) ? summary.authors : (summary.authors ? String(summary.authors).split(/,\\s*/) : []),\n      year: summary.year || null,\n      citations: summary.citations == null ? null : summary.citations,\n      url: summary.url || '',\n      source: summary.source || '',\n      doi: summary.doi || null,\n      relevance_reason: summary.relevance_reason || '',\n      paper_type: summary.paper_type || ''\n    }\n  })\n};\n"
       },
-      "id": "3a2b9dc7-d4be-433a-a84a-b80d1e190f9e",
+      "id": "9f440cee-0b89-4a83-a357-af317c449aa6",
       "name": "Parse Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        800,
-        96
+        1168,
+        0
       ]
     },
     {
       "parameters": {
         "jsCode": "const items = $input.all();\nconst summaries = items.map(function (i) { return i.json; });\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || '';\nreturn [{ json: { topic: topic, summaries: summaries, paper_count: summaries.length } }];\n"
       },
-      "id": "8bbdb8c7-a8f5-47b2-b39b-d8e0214bf054",
+      "id": "8936e628-f4b1-4eb9-acfa-dce6e03014db",
       "name": "Aggregate Summaries",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1104,
-        496
+        1472,
+        400
       ]
     },
     {
       "parameters": {
         "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(i => i >= 0);\n    if (!starts.length) throw firstError;\n\n    const start = Math.min(...starts);\n    const end = cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}');\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet comparison;\ntry {\n  comparison = parseJsonFromOutput($json.output);\n} catch (e) {\n  comparison = { error: 'parse failed', raw: $json.output, details: e.message };\n}\n\nreturn [{ json: comparison }];\n"
       },
-      "id": "dcf68bd8-92fa-40fb-956c-2dbcba5715d4",
+      "id": "7845c2a7-9a9f-46e3-9afa-a6d79ae8ecdf",
       "name": "Parse Comparison",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1888,
-        96
+        2256,
+        0
       ]
     },
     {
       "parameters": {
         "jsCode": "function cleanAgentOutput(value) {\n  if (value == null) return '';\n  if (typeof value !== 'string') return JSON.stringify(value);\n  return value\n    .replace(/^\\s*\\`\\`\\`(?:json)?\\s*/i, '')\n    .replace(/\\`\\`\\`\\s*$/i, '')\n    .trim();\n}\n\nfunction parseJsonFromOutput(value) {\n  const cleaned = cleanAgentOutput(value);\n  try {\n    return JSON.parse(cleaned);\n  } catch (firstError) {\n    const startObject = cleaned.indexOf('{');\n    const startArray = cleaned.indexOf('[');\n    const starts = [startObject, startArray].filter(i => i >= 0);\n    if (!starts.length) throw firstError;\n\n    const start = Math.min(...starts);\n    const end = cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}');\n    if (end <= start) throw firstError;\n    return JSON.parse(cleaned.slice(start, end + 1));\n  }\n}\n\nlet hyp;\ntry {\n  hyp = parseJsonFromOutput($json.output);\n} catch (e) {\n  hyp = { error: 'parse failed', raw: $json.output, details: e.message };\n}\n\nreturn [{ json: hyp }];\n"
       },
-      "id": "8fda3e78-0cfb-4e8f-9a69-63af2e286cc9",
+      "id": "811c73f0-6469-4e6c-9f19-31f70de0ad17",
       "name": "Parse Hypothesis",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1920,
-        832
+        2288,
+        736
       ]
     },
     {
       "parameters": {
         "jsCode": "// Build Report - assemble the final markdown and emit it as downloadable binary data.\nconst form = $('Research Form').first().json;\nconst topic = form['Research topic'] || form.topic || 'Unknown topic';\n\nconst agg = $('Aggregate Summaries').first().json;\nconst summaries = agg.summaries || [];\n\nconst comparison = $('Parse Comparison').first().json || {};\nconst hyp = $('Parse Hypothesis').first().json || {};\n\nconst date = new Date().toISOString().slice(0, 10);\n\nfunction esc(s) { return (s == null ? '' : String(s)); }\nfunction authorLine(meta) {\n  const a = (meta && meta.authors) || [];\n  if (a.length === 0) return 'Unknown authors';\n  if (a.length <= 4) return a.join(', ');\n  return a.slice(0, 4).join(', ') + ' et al.';\n}\n\nlet md = '';\nmd += '# Research Report: ' + topic + '\\n\\n';\nmd += '_Generated ' + date + ' by the Multi-Agent Research Assistant._\\n\\n';\nmd += '---\\n\\n';\n\nmd += '## 1. Literature Summary\\n\\n';\nmd += 'Reviewed **' + summaries.length + '** papers across arXiv, Semantic Scholar, and OpenAlex.\\n\\n';\nfor (const s of summaries) {\n  const meta = s._meta || {};\n  md += '### ' + esc(meta.title || s.title || 'Untitled') + '\\n';\n  md += '*' + authorLine(meta) + ' (' + esc(meta.year || 'n.d.') + ')';\n  if (meta.citations != null) md += ' · ' + meta.citations + ' citations';\n  md += ' · ' + esc(meta.source || '');\n  if (meta.url) md += ' · [link](' + meta.url + ')';\n  md += '*\\n\\n';\n  md += '- **Problem:** ' + esc(s.problem) + '\\n';\n  md += '- **Method:** ' + esc(s.method) + '\\n';\n  md += '- **Dataset:** ' + esc(s.dataset) + '\\n';\n  md += '- **Architecture:** ' + esc(s.architecture) + '\\n';\n  md += '- **Results:** ' + esc(s.results) + '\\n';\n  md += '- **Limitations:** ' + esc(s.limitations) + '\\n';\n  md += '- **Novelty:** ' + esc(s.novelty) + '\\n\\n';\n}\n\nmd += '## 2. Comparison\\n\\n';\nmd += (comparison.table_markdown || '_No comparison table generated._') + '\\n\\n';\n\nif (comparison.clusters && comparison.clusters.length) {\n  md += '### Clusters\\n\\n';\n  for (const c of comparison.clusters) {\n    md += '- **' + esc(c.name) + '** — ' + esc(c.common_thread || '') + '\\n';\n    md += '  - Papers: ' + (c.papers || []).join(', ') + '\\n';\n  }\n  md += '\\n';\n}\n\nif (comparison.observations) {\n  md += '### Cross-paper Observations\\n\\n' + comparison.observations + '\\n\\n';\n}\n\nmd += '## 3. Research Gaps\\n\\n';\nfor (const g of (hyp.research_gaps || [])) md += '- ' + esc(g) + '\\n';\nif (!(hyp.research_gaps && hyp.research_gaps.length)) md += '_(none identified)_\\n';\nmd += '\\n';\n\nmd += '## 4. Proposed Hypothesis\\n\\n';\nif (hyp.hypothesis) {\n  md += '> **' + esc(hyp.hypothesis.statement) + '**\\n\\n';\n  md += esc(hyp.hypothesis.rationale) + '\\n\\n';\n}\n\nmd += '## 5. Experiment Plan\\n\\n';\nconst ep = hyp.experiment_plan || {};\nmd += '**Objective:** ' + esc(ep.objective) + '\\n\\n';\nmd += '**Dataset / simulation:** ' + esc(ep.dataset_or_simulation) + '\\n\\n';\nif ((ep.baselines || []).length) {\n  md += '**Baselines:**\\n';\n  for (const b of ep.baselines) md += '- ' + esc(b) + '\\n';\n  md += '\\n';\n}\nif ((ep.metrics || []).length) {\n  md += '**Metrics:**\\n';\n  for (const m of ep.metrics) md += '- ' + esc(m) + '\\n';\n  md += '\\n';\n}\nif ((ep.implementation_steps || []).length) {\n  md += '**Implementation steps:**\\n';\n  ep.implementation_steps.forEach(function (step, i) { md += (i + 1) + '. ' + esc(step) + '\\n'; });\n  md += '\\n';\n}\n\nmd += '## 6. Risks & Caveats\\n\\n';\nfor (const r of (hyp.risks || [])) md += '- ' + esc(r) + '\\n';\nif (!(hyp.risks && hyp.risks.length)) md += '_(none identified)_\\n';\nmd += '\\n---\\n\\n_End of report._\\n';\n\nconst safeSlug = topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50);\nconst filename = 'report-' + date + '-' + safeSlug + '.md';\n\nconst binary = await this.helpers.prepareBinaryData(Buffer.from(md, 'utf-8'), filename, 'text/markdown');\n\nreturn [{\n  json: { topic: topic, filename: filename, paper_count: summaries.length },\n  binary: { data: binary },\n}];\n"
       },
-      "id": "67d32154-962c-4d00-8266-e6e5167de4db",
+      "id": "e761ad98-3528-4a21-9f9b-0424c73ee3ca",
       "name": "Build Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2528,
-        464
+        2896,
+        368
       ]
     },
     {
@@ -120,10 +120,10 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        -144,
-        576
+        224,
+        480
       ],
-      "id": "ce59e27e-b0ab-4e91-961e-78a460f939c8",
+      "id": "80804f9c-9de9-4e6e-a1ef-4c42983c3b92",
       "name": "Literature Agent"
     },
     {
@@ -135,25 +135,25 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        464,
-        576
+        832,
+        480
       ],
-      "id": "d45166ad-deb2-43f7-9ad0-321e0ff75ea4",
+      "id": "5b6e4b61-f1e7-4bf1-bb9c-eb4f20ae316a",
       "name": "Summarization Agent"
     },
     {
       "parameters": {
         "toolDescription": "Search OpenAlex works for broad academic coverage. Query should be plain keywords.",
-        "url": "=https://api.openalex.org/works?search={{encodeURIComponent($fromAI(\"query\"))}}&per_page=10&sort=relevance_score:desc",
+        "url": "=https://api.openalex.org/works?search={{$fromAI(\"query\")}}&per_page=10&sort=relevance_score:desc",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        48,
-        352
+        320,
+        320
       ],
-      "id": "84469393-8277-47e3-9795-341f14b21ae0",
+      "id": "8e0f5e28-9b64-44cf-ad17-b34f65119194",
       "name": "OpenAlex"
     },
     {
@@ -165,10 +165,10 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        1520,
-        96
+        1888,
+        0
       ],
-      "id": "4dda0b2c-cce8-4b5a-934e-ed95ac1ab015",
+      "id": "e794bb3d-c136-4ca5-95e0-43ea055c9d03",
       "name": "Comparison Agent1"
     },
     {
@@ -180,10 +180,10 @@
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        1520,
-        832
+        1888,
+        736
       ],
-      "id": "3375a700-ca0e-4a2e-974b-aee2085560b0",
+      "id": "f8e2cdaa-2d3d-4a16-9df4-eb062abfb0d1",
       "name": "Hypothesis Agent1"
     },
     {
@@ -192,13 +192,13 @@
         "combineBy": "combineByPosition",
         "options": {}
       },
-      "id": "30752c74-261d-4dbb-9601-b65334aa1de1",
+      "id": "760fd159-aecd-4931-8f64-aaa801f54042",
       "name": "Merge Agent Results",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        2208,
-        464
+        2576,
+        368
       ]
     },
     {
@@ -209,14 +209,14 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        -144,
-        736
+        224,
+        640
       ],
-      "id": "ed4cec0b-3fb6-4963-a65e-61c1b60072ff",
+      "id": "e3f37bf0-119d-484d-98e6-afd7cdf2547b",
       "name": "OpenRouter Chat Model",
       "credentials": {
         "openRouterApi": {
-          "id": "IOVEMKkWJGjAx9xt",
+          "id": "kIRe2RWzfHpqXT9b",
           "name": "OpenRouter account"
         }
       }
@@ -229,14 +229,14 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        1520,
-        1008
+        1888,
+        912
       ],
-      "id": "8060a8bc-6eb6-4b63-be56-3b1f96c2739f",
+      "id": "d6615548-2fbe-4793-aed5-71296a0e7e9e",
       "name": "OpenRouter Chat Model1",
       "credentials": {
         "openRouterApi": {
-          "id": "IOVEMKkWJGjAx9xt",
+          "id": "kIRe2RWzfHpqXT9b",
           "name": "OpenRouter account"
         }
       }
@@ -249,14 +249,14 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        1392,
-        304
+        1760,
+        208
       ],
-      "id": "43b545f6-6079-44ee-a055-6f1bd8a6c2e1",
+      "id": "b4c4dcd3-6303-46c2-aac6-400934245636",
       "name": "OpenRouter Chat Model2",
       "credentials": {
         "openRouterApi": {
-          "id": "IOVEMKkWJGjAx9xt",
+          "id": "kIRe2RWzfHpqXT9b",
           "name": "OpenRouter account"
         }
       }
@@ -269,14 +269,14 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
       "typeVersion": 1,
       "position": [
-        336,
-        784
+        832,
+        688
       ],
-      "id": "ef1493a8-0f29-49df-a802-2541e966aed0",
+      "id": "591dd021-e27d-4f04-bb6f-aaa30f18ebc3",
       "name": "OpenRouter Chat Model3",
       "credentials": {
         "openRouterApi": {
-          "id": "IOVEMKkWJGjAx9xt",
+          "id": "kIRe2RWzfHpqXT9b",
           "name": "OpenRouter account"
         }
       }
@@ -471,11 +471,12 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "1c3580b8-6189-43f9-8b6a-b8f552f51a75",
+  "versionId": "b555f670-3440-4265-a3e1-89beeca1fad7",
   "meta": {
     "templateCredsSetupCompleted": true,
-    "instanceId": "b0987ebbba1e154d25ba6bd2918b835a24324356a2dbdc592c10a73378510ebb"
+    "instanceId": "5e6a269fa7acd7d0c5b08eb002ce3402b526502710d7ef5c877a1618ab65a9f6"
   },
-  "id": "5ze84FMqu1D9COzk",
+  "nodeGroups": [],
+  "id": "AAV1P4wUkjUbBOx9",
   "tags": []
 }
