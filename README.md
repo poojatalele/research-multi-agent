@@ -70,3 +70,7 @@ openrouter/free
 6. Submit the form and wait for the workflow to finish.
 7. Open the final **Build Report** node.
 8. Download the markdown file from the binary output named `data`.
+
+## Demo Video
+
+[You can watch my Demo Video here:](demo-video.mov)
